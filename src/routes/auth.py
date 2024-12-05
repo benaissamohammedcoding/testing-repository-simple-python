@@ -3,9 +3,10 @@ import json
 from flask import Blueprint
 from flask import jsonify
 from flask import request
+import psycopg2
 from flask_jwt_extended import create_access_token
 
-from src.static import DATA_FILE_PATH
+from src.static import get_db_connection
 
 auth_bp = Blueprint("auth_bp", __name__)
 
@@ -23,32 +24,31 @@ def authenticate():
                 "status_code": 400,
             }
         )
+    
 
-    with open(DATA_FILE_PATH, encoding="utf-8", mode="w+") as data_file:
-        try:
-            data = json.load(data_file)
-        except json.decoder.JSONDecodeError:
-            data = {"users": []}
+       # Connexion à la base de données RDS
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-        try:
-            id = data["users"].index(username)
-        except ValueError:
-            id = len(data["users"])
+    # Vérifiez si l'utilisateur existe
+    cur.execute('SELECT id FROM users WHERE username = %s', (username,))
+    result = cur.fetchone()
 
-        identity = {
-            "id": id,
-            "username": username,
-        }
+    if result:
+        user_id = result[0]
+    else:
+        # Si l'utilisateur n'existe pas, créez un nouvel utilisateur
+        cur.execute('INSERT INTO users (username) VALUES (%s) RETURNING id', (username,))
+        user_id = cur.fetchone()[0]
 
-        access_token = create_access_token(
-            identity=identity, fresh=True, additional_claims={}
-        )
+    # Création du token d'accès
+    identity = {"id": user_id, "username": username}
+    access_token = create_access_token(identity=identity)
 
-        response = {"success": True, "return": {"access": access_token}, "code": 200}
+    response = {"success": True, "return": {"access": access_token}, "code": 200}
 
-        resp = jsonify(response)
+    conn.commit()
+    cur.close()
+    conn.close()
 
-        data["users"].append(username)
-        json.dump(data, data_file, ensure_ascii=False, indent=4)
-
-        return resp
+    return jsonify(response)

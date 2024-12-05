@@ -1,10 +1,10 @@
 import json
 from typing import Dict
-
+import psycopg2
 from flask import jsonify
 from flask_jwt_extended import JWTManager
 
-from src.static import DATA_FILE_PATH
+from src.static import get_db_connection
 
 
 def register_jwt_handlers(jwt: JWTManager):
@@ -13,14 +13,21 @@ def register_jwt_handlers(jwt: JWTManager):
         _jwt_header: Dict[str, str], jwt_data: Dict[str, Dict[str, str]]
     ):
         identity = jwt_data["sub"]
-        with open(DATA_FILE_PATH, encoding="utf-8", mode="r") as data_file:
-            try:
-                data = json.load(data_file)
-            except json.decoder.JSONDecodeError:
-                return None
+        conn = get_db_connection()
+        cursor = conn.cursor()
+         cursor.execute("SELECT id, username FROM users WHERE id = %s", (identity["id"],))
+        user = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
 
-            if data["users"][identity["id"]] != identity["username"]:
-                return None
+        if user is None:
+            return None
+        
+        db_id, db_username = user
+        if db_username != identity["username"]:
+            return None
+        
         return identity
 
     @jwt.expired_token_loader
